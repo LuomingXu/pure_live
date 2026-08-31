@@ -495,6 +495,45 @@ class DanmakuItem extends StatelessWidget {
 
     final textColor = isDark ? Colors.white70 : Colors.black87;
 
+    var fanBadgeColor = Colors.black87;
+    final fanLevel = int.tryParse(danmaku.fansLevel ?? '') ?? 0;
+    if (fanLevel <= 5) {
+      fanBadgeColor = Color.fromARGB(255, 125, 208, 253); // #7DD0FD
+    } else if (fanLevel <= 10) {
+      fanBadgeColor = Color.fromARGB(255, 76, 213, 225);  // #4CD5E1
+    } else if (fanLevel <= 15) {
+      fanBadgeColor = Color.fromARGB(255, 251, 157, 35);  // #FB9D23
+    } else if (fanLevel <= 20) {
+      fanBadgeColor = Color.fromARGB(255, 250, 121, 31);  // #FA791F
+    } else if (fanLevel <= 25) {
+      fanBadgeColor = Color.fromARGB(255, 250, 76, 28);   // #FA4C1C
+    } else if (fanLevel <= 30) {
+      fanBadgeColor = Color.fromARGB(255, 172, 56, 211); // #AC38D3
+    } else {
+      fanBadgeColor = Color.fromARGB(255, 124, 0, 227);   // #7C00E3
+    }
+
+    var userLevelColor = Colors.black87;
+    final userLevel = int.tryParse(danmaku.userLevel ?? '') ?? 0;
+    if (userLevel <= 19) {
+      userLevelColor = Color.fromARGB(255, 222, 217, 198); // #DED9C6
+    } else if (userLevel <= 29) {
+      userLevelColor = Color.fromARGB(255, 148, 210, 86);  // #94D256
+    } else if (userLevel <= 39) {
+      userLevelColor = Color.fromARGB(255, 151, 179, 213); // #97B3D5
+    } else if (userLevel <= 69) {
+      userLevelColor = Color.fromARGB(255, 57, 128, 249);  // #3980F9
+    } else if (userLevel <= 79) {
+      userLevelColor = Color.fromARGB(255, 180, 44, 244);  // #B42CF4
+    } else if (userLevel <= 89) {
+      userLevelColor = Color.fromARGB(255, 250, 123, 131); // #FA7B83
+    } else if (userLevel <= 99) {
+      userLevelColor = Color.fromARGB(255, 249, 77, 85);   // #F94D55
+    } else {
+      userLevelColor = Color.fromARGB(255, 245, 242, 65);  // #F5F241
+    }
+
+
     return RepaintBoundary(
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
@@ -527,11 +566,16 @@ class DanmakuItem extends StatelessWidget {
                       TextSpan(
                         children: [
                           TextSpan(
-                            text: '${danmaku.userName}: ',
-                            style: AppTextStyles.t14.copyWith(
-                              fontWeight: FontWeight.w700,
-                              color: textColor,
-                            ),
+                            text: "${danmaku.userLevel} ",
+                            style: AppTextStyles.t14.copyWith(fontWeight: FontWeight.w700, color: userLevelColor),
+                          ),
+                          TextSpan(
+                            text: "${danmaku.fansLevel}${danmaku.fansName} ",
+                            style: AppTextStyles.t14.copyWith(fontWeight: FontWeight.w700, color: fanBadgeColor),
+                          ),
+                          TextSpan(
+                            text: "${danmaku.userName}: ",
+                            style: AppTextStyles.t14.copyWith(fontWeight: FontWeight.w700, color: textColor),
                           ),
                           TextSpan(
                             children: parseEmojis(

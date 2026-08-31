@@ -132,6 +132,9 @@ class DouyuDanmaku implements LiveDanmaku {
             userName: jsonData['nn']?.toString() ?? '',
             userId: jsonData['uid']?.toString() ?? '',
             message: jsonData['txt']?.toString() ?? '',
+            userLevel: jsonData['level']?.toString() ?? '',
+            fansLevel: jsonData['bl']?.toString() ?? '',
+            fansName: jsonData['bnn']?.toString() ?? '',
             color: getColor(col),
             messageId: messageId.isEmpty ? '' : 'douyu:$messageId',
             sentAt: sentAt,
@@ -140,6 +143,15 @@ class DouyuDanmaku implements LiveDanmaku {
           liveMsg = _parseCommonSuperChat(jsonData);
         } else if (type == 'voice_trlt') {
           liveMsg = _parseVoiceSuperChat(jsonData);
+        } else if (type == "oni") {
+          liveMsg = LiveMessage(
+            type: LiveMessageType.chat,
+            userName: '贵宾',
+            message: jsonData['vn']?.toString() ?? '',
+            color: LiveMessageColor.white,
+            // messageId: messageId.isEmpty ? '' : 'douyu:$messageId',
+            // sentAt: sentAt,
+          );
         }
         if (liveMsg != null) onMessage?.call(liveMsg);
       } catch (e) {

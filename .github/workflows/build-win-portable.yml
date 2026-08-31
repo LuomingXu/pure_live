@@ -1,0 +1,116 @@
+name: PureLive Windows Portable
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-portable-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  FLUTTER_CHANNEL: stable
+
+jobs:
+  windows-portable:
+    name: Windows x64 Portable ZIP
+    runs-on: windows-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
+        with:
+          channel: ${{ env.FLUTTER_CHANNEL }}
+          cache: true
+      - name: Enable Flutter Windows
+        run: flutter config --enable-windows-desktop
+      - name: Resolve packages
+        run: flutter pub get
+      - name: Generate production AppConfig
+        run: |
+          dart run enven `
+            --env-files .env,.env.prod `
+            --class-name AppConfig
+      - name: Build Windows release
+        run: |
+          flutter build windows `
+            --release `
+            --dart-define=PURELIVE_BUILD_SOURCE=github-manual
+      - name: Get version
+        id: version
+        shell: pwsh
+        run: |
+          $lines = Get-Content pubspec.yaml
+          foreach ($line in $lines) {
+            if ($line -match '^\s*version:\s*(\S+)') {
+              $fullVersion = $matches[1] -replace '[`"''`]', ''
+              $displayVersion = $fullVersion.Split('+')[0]
+              $artifactVersion = $fullVersion.Replace('+', '-')
+              "version=$displayVersion" | Out-File $env:GITHUB_OUTPUT -Encoding utf8 -Append
+              "artifact_version=$artifactVersion" | Out-File $env:GITHUB_OUTPUT -Encoding utf8 -Append
+              exit 0
+            }
+          }
+          Write-Error "Version not found"
+      - name: Locate Windows release bundle
+        id: bundle
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $bundle = "build\windows\x64\runner\Release"
+          if (!(Test-Path $bundle -PathType Container)) {
+            Write-Error "Windows release bundle not found: $bundle"
+          }
+          "path=$bundle" | Out-File $env:GITHUB_OUTPUT -Encoding utf8 -Append
+      - name: Create Windows portable archive
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $version = "${{ steps.version.outputs.artifact_version }}"
+          $bundle = "${{ steps.bundle.outputs.path }}"
+          $portable = "PureLive-$version-windows-x64-portable.zip"
+          $temporary = Join-Path $env:RUNNER_TEMP "pure-live-portable"
+          Remove-Item $temporary -Recurse -Force -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Path $temporary -Force | Out-Null
+          Get-ChildItem $bundle -Force |
+            Where-Object {
+              $_.Name -notin @("AppData", "IPTV_CACHE")
+            } |
+            Copy-Item -Destination $temporary -Recurse -Force
+          if (Test-Path (Join-Path $temporary "AppData")) {
+            Remove-Item (Join-Path $temporary "AppData") -Recurse -Force
+          }
+          if (Test-Path (Join-Path $temporary "IPTV_CACHE")) {
+            Remove-Item (Join-Path $temporary "IPTV_CACHE") -Recurse -Force
+          }
+          Compress-Archive `
+            -Path (Join-Path $temporary "*") `
+            -DestinationPath $portable `
+            -CompressionLevel Optimal `
+            -Force
+          if (!(Test-Path $portable -PathType Leaf)) {
+            Write-Error "Windows portable archive was not created."
+          }
+      - name: Verify Windows portable archive
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $version = "${{ steps.version.outputs.artifact_version }}"
+          $portable = "PureLive-$version-windows-x64-portable.zip"
+          if (!(Test-Path $portable -PathType Leaf)) {
+            Write-Error "Portable package not found: $portable"
+          }
+          $entries = tar -tf $portable
+          if ($entries | Where-Object { $_ -match '(^|/)(AppData|IPTV_CACHE)(/|$)' }) {
+            Write-Error "Runtime state was found in the Windows portable package."
+          }
+      - name: Upload Windows portable artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: pure-live-windows-portable
+          path: |
+            PureLive-*-windows-x64-portable.zip
+          if-no-files-found: error
+          retention-days: 3
