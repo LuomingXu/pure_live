@@ -138,6 +138,9 @@ class DouyuDanmaku implements LiveDanmaku {
             userName: jsonData["nn"]?.toString() ?? '',
             userId: jsonData['uid']?.toString() ?? '',
             message: text,
+            userLevel: jsonData['level']?.toString() ?? '',
+            fansLevel: jsonData['bl']?.toString() ?? '',
+            fansName: jsonData['bnn']?.toString() ?? '',
             color: getColor(col),
             messageId: messageId.isEmpty ? '' : 'douyu:$messageId',
             sentAt: sentAt,
@@ -146,6 +149,22 @@ class DouyuDanmaku implements LiveDanmaku {
           liveMsg = _parseCommonSuperChat(jsonData);
         } else if (type == "voice_trlt") {
           liveMsg = _parseVoiceSuperChat(jsonData);
+        } else if (type == 'oni') {
+          liveMsg = LiveMessage(
+            type: LiveMessageType.chat,
+            userName: '贵宾',
+            message: jsonData['vn']?.toString() ?? '',
+            color: LiveMessageColor.white,
+          );
+        } else if (type == 'newblackres') {
+          final snic = jsonData['snic']?.toString() ?? '';
+          final dnic = jsonData['dnic']?.toString() ?? '';
+          liveMsg = LiveMessage(
+            type: LiveMessageType.chat,
+            userName: '',
+            message: "${dnic} 被 ${snic} 禁言",
+            color: getColor(1),
+          );
         }
         if (liveMsg != null) onMessage?.call(liveMsg);
       } catch (e) {
@@ -302,17 +321,17 @@ class DouyuDanmaku implements LiveDanmaku {
   LiveMessageColor getColor(int type) {
     switch (type) {
       case 1:
-        return LiveMessageColor(255, 0, 0);
+        return LiveMessageColor(255, 0, 0); // #FF0000
       case 2:
-        return LiveMessageColor(30, 135, 240);
+        return LiveMessageColor(30, 135, 240); // #1E87F0
       case 3:
-        return LiveMessageColor(122, 200, 75);
+        return LiveMessageColor(122, 200, 75); // #7AC84B
       case 4:
-        return LiveMessageColor(255, 127, 0);
+        return LiveMessageColor(255, 127, 0); // #FF7F00
       case 5:
-        return LiveMessageColor(155, 57, 244);
+        return LiveMessageColor(155, 57, 244); // #9B39F4
       case 6:
-        return LiveMessageColor(255, 105, 180);
+        return LiveMessageColor(255, 105, 180); // #FF69B4
       default:
         return LiveMessageColor.white;
     }
