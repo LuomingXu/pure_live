@@ -19,8 +19,8 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 35
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
+      - uses: actions/checkout@v7 # v7.0.1
+      - uses: subosito/flutter-action@v2 # v2.23.0
         with:
           channel: ${{ env.FLUTTER_CHANNEL }}
           cache: true
@@ -107,7 +107,7 @@ jobs:
             Write-Error "Runtime state was found in the Windows portable package."
           }
       - name: Upload Windows portable artifact
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@v7 # v7
         with:
           name: pure-live-windows-portable
           path: |

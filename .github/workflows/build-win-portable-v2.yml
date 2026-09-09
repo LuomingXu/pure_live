@@ -1,0 +1,295 @@
+name: PureLive Windows Portable v2
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-portable-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # 发布构建建议固定版本，不要直接跟随 stable。
+  # 这样可以避免 Flutter SDK 更新导致 native C++ cache 大面积失效。
+  FLUTTER_VERSION: 3.47.2
+
+  # sccache 使用 GitHub Actions Cache backend
+  SCCACHE_GHA_ENABLED: "on"
+
+  # 限制本地 sccache 大小，主要用于 GHA backend 的本地工作区缓存。
+  SCCACHE_CACHE_SIZE: 5G
+
+jobs:
+  windows-portable:
+    name: Windows x64 Portable ZIP
+    runs-on: windows-latest
+    timeout-minutes: 35
+
+    steps:
+      # ------------------------------------------------------------
+      # Checkout
+      # ------------------------------------------------------------
+      - name: Checkout
+        uses: actions/checkout@v7
+        # v7.0.1
+
+      # ------------------------------------------------------------
+      # Flutter SDK + Pub cache
+      # ------------------------------------------------------------
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        # v2.23.0
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      # ------------------------------------------------------------
+      # Windows desktop
+      # ------------------------------------------------------------
+      - name: Enable Flutter Windows
+        run: flutter config --enable-windows-desktop
+
+      # ------------------------------------------------------------
+      # Install sccache
+      # ------------------------------------------------------------
+      - name: Enable sccache
+        uses: hendrikmuhs/ccache-action@v1
+        with:
+            variant: sccache
+            key: windows-msvc-flutter
+            restore-keys: |
+                windows-msvc-flutter
+            max-size: 5G
+
+      # ------------------------------------------------------------
+      # Verify MSVC environment
+      #
+      # windows-latest already contains Visual Studio / MSVC.
+      # Flutter's Windows toolchain will use it.
+      # ------------------------------------------------------------
+      - name: Verify MSVC
+        shell: pwsh
+        run: |
+          Write-Host "Visual Studio:"
+          & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" `
+            -latest `
+            -products * `
+            -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 `
+            -property installationPath
+
+          Write-Host ""
+          Write-Host "CMake:"
+          cmake --version
+
+          Write-Host ""
+          Write-Host "Ninja:"
+          ninja --version
+
+      # ------------------------------------------------------------
+      # Resolve packages
+      # ------------------------------------------------------------
+      - name: Resolve packages
+        run: flutter pub get
+
+      # ------------------------------------------------------------
+      # Generate production AppConfig
+      # ------------------------------------------------------------
+      - name: Generate production AppConfig
+        run: |
+          dart run enven `
+            --env-files .env,.env.prod `
+            --class-name AppConfig
+
+      # ------------------------------------------------------------
+      # Show sccache state before build
+      # ------------------------------------------------------------
+      - name: sccache stats before build
+        shell: pwsh
+        run: |
+          sccache --show-stats
+
+      # ------------------------------------------------------------
+      # Build Windows release
+      #
+      # CMake/MSVC compilation will go through sccache.
+      # ------------------------------------------------------------
+      - name: Build Windows release
+        shell: pwsh
+        env:
+          SCCACHE_GHA_ENABLED: "on"
+        run: |
+          flutter build windows `
+            --release `
+            --dart-define=PURELIVE_BUILD_SOURCE=github-manual
+
+      # ------------------------------------------------------------
+      # Show sccache result
+      #
+      # This is important:
+      # you can directly see Cache hits / misses / non-cacheable.
+      # ------------------------------------------------------------
+      - name: sccache stats after build
+        if: always()
+        shell: pwsh
+        run: |
+          sccache --show-stats
+
+      # ------------------------------------------------------------
+      # Dump sccache error log if something went wrong
+      # ------------------------------------------------------------
+      - name: sccache diagnostics
+        if: failure()
+        shell: pwsh
+        run: |
+          if (Test-Path "${env:SCCACHE_ERROR_LOG}") {
+            Get-Content "${env:SCCACHE_ERROR_LOG}"
+          }
+
+      # ------------------------------------------------------------
+      # Get version
+      # ------------------------------------------------------------
+      - name: Get version
+        id: version
+        shell: pwsh
+        run: |
+          $lines = Get-Content pubspec.yaml
+
+          foreach ($line in $lines) {
+            if ($line -match '^\s*version:\s*(\S+)') {
+              $fullVersion = $matches[1] -replace '[`"''`]', ''
+              $displayVersion = $fullVersion.Split('+')[0]
+              $artifactVersion = $fullVersion.Replace('+', '-')
+
+              "version=$displayVersion" |
+                Out-File $env:GITHUB_OUTPUT -Encoding utf8 -Append
+
+              "artifact_version=$artifactVersion" |
+                Out-File $env:GITHUB_OUTPUT -Encoding utf8 -Append
+
+              exit 0
+            }
+          }
+
+          Write-Error "Version not found"
+
+      # ------------------------------------------------------------
+      # Locate Windows release bundle
+      # ------------------------------------------------------------
+      - name: Locate Windows release bundle
+        id: bundle
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          $bundle = "build\windows\x64\runner\Release"
+
+          if (!(Test-Path $bundle -PathType Container)) {
+            Write-Error "Windows release bundle not found: $bundle"
+          }
+
+          "path=$bundle" |
+            Out-File $env:GITHUB_OUTPUT -Encoding utf8 -Append
+
+      # ------------------------------------------------------------
+      # Create portable archive
+      # ------------------------------------------------------------
+      - name: Create Windows portable archive
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          $version = "${{ steps.version.outputs.artifact_version }}"
+          $bundle = "${{ steps.bundle.outputs.path }}"
+
+          $portable = "PureLive-$version-windows-x64-portable.zip"
+          $temporary = Join-Path $env:RUNNER_TEMP "pure-live-portable"
+
+          Remove-Item `
+            $temporary `
+            -Recurse `
+            -Force `
+            -ErrorAction SilentlyContinue
+
+          New-Item `
+            -ItemType Directory `
+            -Path $temporary `
+            -Force |
+            Out-Null
+
+          Get-ChildItem $bundle -Force |
+            Where-Object {
+              $_.Name -notin @(
+                "AppData",
+                "IPTV_CACHE"
+              )
+            } |
+            Copy-Item `
+              -Destination $temporary `
+              -Recurse `
+              -Force
+
+          if (Test-Path (Join-Path $temporary "AppData")) {
+            Remove-Item `
+              (Join-Path $temporary "AppData") `
+              -Recurse `
+              -Force
+          }
+
+          if (Test-Path (Join-Path $temporary "IPTV_CACHE")) {
+            Remove-Item `
+              (Join-Path $temporary "IPTV_CACHE") `
+              -Recurse `
+              -Force
+          }
+
+          Compress-Archive `
+            -Path (Join-Path $temporary "*") `
+            -DestinationPath $portable `
+            -CompressionLevel Optimal `
+            -Force
+
+          if (!(Test-Path $portable -PathType Leaf)) {
+            Write-Error "Windows portable archive was not created."
+          }
+
+      # ------------------------------------------------------------
+      # Verify archive
+      # ------------------------------------------------------------
+      - name: Verify Windows portable archive
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          $version = "${{ steps.version.outputs.artifact_version }}"
+          $portable = "PureLive-$version-windows-x64-portable.zip"
+
+          if (!(Test-Path $portable -PathType Leaf)) {
+            Write-Error "Portable package not found: $portable"
+          }
+
+          $entries = tar -tf $portable
+
+          if (
+            $entries |
+              Where-Object {
+                $_ -match '(^|/)(AppData|IPTV_CACHE)(/|$)'
+              }
+          ) {
+            Write-Error `
+              "Runtime state was found in the Windows portable package."
+          }
+
+      # ------------------------------------------------------------
+      # Upload artifact
+      # ------------------------------------------------------------
+      - name: Upload Windows portable artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: pure-live-windows-portable
+          path: |
+            PureLive-*-windows-x64-portable.zip
+          if-no-files-found: error
+          retention-days: 3
