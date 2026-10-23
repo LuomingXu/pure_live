@@ -1,0 +1,120 @@
+# Personal Windows test builds only.
+#
+# - No GitHub Release, no releases.json update, no signing certificate.
+# - Produces a portable ZIP that runs after extraction.
+name: Build Windows Portable Test
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-portable-test-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Keep in sync with .fvmrc so test builds match local development.
+  FLUTTER_VERSION: 3.47.5
+
+jobs:
+  windows-portable:
+    name: Windows x64 Portable ZIP
+    runs-on: windows-latest
+    timeout-minutes: 40
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      - name: Resolve packages
+        run: flutter pub get --enforce-lockfile
+
+      - name: Generate AppConfig
+        shell: pwsh
+        run: |
+          dart run enven `
+            --env-files .env,.env.prod `
+            --class-name AppConfig
+
+      - name: Build Windows release
+        shell: pwsh
+        run: |
+          flutter build windows `
+            --release `
+            --dart-define=PURELIVE_BUILD_SOURCE=github-test
+
+      - name: Read version
+        id: version
+        uses: ./.github/actions/get-version
+
+      - name: Create portable archive
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          $version = "${{ steps.version.outputs.artifact_version }}"
+          $bundle = "build\windows\x64\runner\Release"
+          $portable = "PureLive-$version-windows-x64-portable.zip"
+          $temporary = Join-Path $env:RUNNER_TEMP "pure-live-test-portable"
+
+          if (!(Test-Path $bundle -PathType Container)) {
+            Write-Error "Windows release bundle not found: $bundle"
+          }
+
+          Remove-Item $temporary -Recurse -Force -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Path $temporary -Force | Out-Null
+
+          Get-ChildItem $bundle -Force |
+            Where-Object { $_.Name -notin @("AppData", "IPTV_CACHE") } |
+            Copy-Item -Destination $temporary -Recurse -Force
+
+          Compress-Archive `
+            -Path (Join-Path $temporary "*") `
+            -DestinationPath $portable `
+            -CompressionLevel Optimal `
+            -Force
+
+          if (!(Test-Path $portable -PathType Leaf)) {
+            Write-Error "Portable archive was not created."
+          }
+
+          $hash = (Get-FileHash $portable -Algorithm SHA256).Hash.ToLower()
+          $line = "$hash  $(Split-Path $portable -Leaf)`n"
+          [IO.File]::WriteAllText(
+            (Join-Path (Get-Location) "SHA256SUM-windows.txt"),
+            $line,
+            [Text.Encoding]::ASCII
+          )
+
+      - name: Verify portable archive
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          $portable = Get-ChildItem "PureLive-*-windows-x64-portable.zip" | Select-Object -First 1
+          if (!$portable) {
+            Write-Error "Portable package not found."
+          }
+
+          $entries = tar -tf $portable.FullName
+          if ($entries | Where-Object { $_ -match '(^|/)(AppData|IPTV_CACHE)(/|$)' }) {
+            Write-Error "Runtime state was found in the portable package."
+          }
+
+      - name: Upload portable test package
+        uses: actions/upload-artifact@v7
+        with:
+          name: pure-live-windows-portable-test-${{ github.run_number }}
+          path: |
+            PureLive-*-windows-x64-portable.zip
+            SHA256SUM-windows.txt
+          if-no-files-found: error
+          retention-days: 7
